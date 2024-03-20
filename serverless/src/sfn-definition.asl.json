@@ -1,0 +1,32 @@
+{
+  "Comment": "A state machine that runs the summarize and embedding functions in parallel.",
+  "StartAt": "ParallelState",
+  "States": {
+    "ParallelState": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "SummarizeFunction",
+          "States": {
+            "SummarizeFunction": {
+              "Type": "Task",
+              "Resource": "${SummarizeFunctionArn}",
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "EmbeddingFunction",
+          "States": {
+            "EmbeddingFunction": {
+              "Type": "Task",
+              "Resource": "${EmbeddingFunctionArn}",
+              "End": true
+            }
+          }
+        }
+      ],
+      "End": true
+    }
+  }
+}

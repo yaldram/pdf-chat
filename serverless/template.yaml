@@ -1,0 +1,118 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  pdf-chat
+
+  SAM Template for pdf-chat serverless workflows.
+  
+Parameters:
+  PartnerEventSource:
+    Description: Name of Partner Event Source
+    Type: String
+  
+Globals:
+  Function:
+    Timeout: 600
+
+Resources:
+  SummarizeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: summarize.lambdaHandler
+      Runtime: nodejs18.x
+      Architectures:
+        - x86_64
+      Layers:
+        - !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:layer:pdfdist-layer:1
+
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2020"
+        Sourcemap: true
+        EntryPoints: 
+        - summarize.ts
+        External: ["pdfjs-dist"]
+
+  EmbeddingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: embedding.lambdaHandler
+      Runtime: nodejs18.x
+      Architectures:
+        - x86_64
+      Layers:
+        - !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:layer:pdfdist-layer:1
+      MemorySize: 512
+
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2020"
+        Sourcemap: true
+        EntryPoints: 
+        - embedding.ts
+        External: ["pdfjs-dist"]
+
+  PdfChatStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      DefinitionUri: src/sfn-definition.asl.json
+      DefinitionSubstitutions:
+        SummarizeFunctionArn: !GetAtt SummarizeFunction.Arn
+        EmbeddingFunctionArn: !GetAtt EmbeddingFunction.Arn
+      Name: PdfChatStateMachine
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - "lambda:InvokeFunction"
+              Resource:
+                - !GetAtt SummarizeFunction.Arn
+                - !GetAtt EmbeddingFunction.Arn
+
+  PdfChatRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: PdfChatTrigger
+      EventBusName: !Ref PartnerEventSource
+      EventPattern: 
+        account: [!Ref AWS::AccountId]
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt PdfChatStateMachine.Arn
+          Id: "TargetFunction"
+          RoleArn: !GetAtt EventBridgeRole.Arn
+
+  EventBridgeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "events.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: "AllowEventBridgeToTriggerStepFunction"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action: "states:StartExecution"
+                Resource: !Ref PdfChatStateMachine
+
+Outputs:
+  SummarizeFunction:
+    Description: "Summarize Lambda Function ARN"
+    Value: !GetAtt SummarizeFunction.Arn
+
+  EmbeddingFunction:
+    Description: "Embedding Lambda Function ARN"
+    Value: !GetAtt EmbeddingFunction.Arn
